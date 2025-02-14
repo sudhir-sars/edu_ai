@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { GPTService } from '../explore/services/gptService';
+import { GPTService } from '@/app/services/gptService';
 import { UserContext, Question } from '../../types';
 
 const gptService = new GPTService();
