@@ -511,7 +511,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
             {/* Render the streaming message at the end if available */}
 
-            {streamingMessage.content && !isLoading ? (
+            {streamingMessage.content ? (
               <div className="px-2 sm:px-4 flex justify-start">
                 <div className="inline-block max-w-[70%]">
                   <div className="">
