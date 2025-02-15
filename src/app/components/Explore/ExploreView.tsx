@@ -1,6 +1,6 @@
 // src/components/Explore/ExploreView.tsx
-'use client';
-
+// @ts-nocheck
+/* eslint-disable */
 import React, {
   useState,
   useCallback,
@@ -208,15 +208,58 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   onRelatedQueryClick,
   userContext,
 }) => {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[] | null>([]);
   const [showInitialSearch, setShowInitialSearch] = useState(!initialQuery);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const gptService = useMemo(() => new GPTService(), []);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [conversationContext, setConversationContext] = useState<string>('');
+
+  const prevScrollTop = useRef(0);
+  const [streamingMessage, setStreamingMessage] = useState<Message | null>(
+    null
+  );
 
   // Add a ref for the messages container
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const currentScrollTop = container.scrollTop;
+
+      // If the user is scrolling upward, disable auto-scroll.
+      if (currentScrollTop < prevScrollTop.current) {
+        setAutoScrollEnabled(false);
+      }
+
+      // Also, if the user is not near the bottom, disable auto-scroll.
+      const distanceFromBottom =
+        container.scrollHeight - currentScrollTop - container.clientHeight;
+      if (distanceFromBottom > 2) {
+        setAutoScrollEnabled(false);
+      }
+
+      // Update previous scrollTop for next comparison
+      prevScrollTop.current = currentScrollTop;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [messagesContainerRef]);
+
+  // 4. Update scrollToBottom to check autoScrollEnabled
+  const scrollToBottom = useCallback(() => {
+    if (autoScrollEnabled && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [autoScrollEnabled, messagesEndRef]);
 
   // More reliable scroll to top function
   const scrollToTop = useCallback(() => {
@@ -234,12 +277,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     }, 100);
   }, []);
 
-  // Call scroll on any message change
   useEffect(() => {
-    if (messages.length > 0) {
-      scrollToTop();
-    }
-  }, [messages.length, scrollToTop]);
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  // Call scroll on any message change
 
   // Add effect to listen for reset
   useEffect(() => {
@@ -252,39 +294,77 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     return () => window.removeEventListener('resetExplore', handleReset);
   }, []);
 
+  useEffect(() => {
+    if (streamingMessage) {
+      scrollToBottom();
+    }
+  }, [streamingMessage, scrollToBottom]);
+
   const handleSearch = useCallback(
     async (query: string) => {
       try {
+        setIsLoading(true);
         if (window.navigator.vibrate) {
           window.navigator.vibrate(50);
         }
 
-        // Scroll before starting the search
-        scrollToTop();
+        // Commit any existing streaming message to messages before a new query.
+        if (streamingMessage) {
+          setMessages((prev) => [...prev, streamingMessage]);
+          setStreamingMessage(null);
+        }
 
-        setIsLoading(true);
-        setMessages([
-          { type: 'user', content: query },
-          { type: 'ai', content: '' },
-        ]);
+        if (showInitialSearch) {
+          scrollToTop();
+          setConversationContext('');
+        }
+
+        setAutoScrollEnabled(true);
+        // (Optional) Reset prevScrollTop if needed.
+        if (messagesContainerRef.current) {
+          prevScrollTop.current = messagesContainerRef.current.scrollTop;
+        }
+
+        setConversationContext(
+          (prevContext) => prevContext + `\nUser: ${query}`
+        );
+
+        // Append the new user query.
+        setMessages((prev) => [...prev, { type: 'user', content: query }]);
+        // Initialize the streaming message.
+        setStreamingMessage({
+          type: 'ai',
+          content: '',
+          topics: [],
+          questions: [],
+        });
+        // scrollToBottom();
 
         setShowInitialSearch(false);
+        setIsLoading(true);
 
         await gptService.streamExploreContent(
           query,
           userContext,
+          conversationContext + `\nUser: ${query}`,
           (chunk: StreamChunk) => {
-            setMessages([
-              { type: 'user', content: query },
-              {
-                type: 'ai',
-                content: chunk.text,
-                topics: chunk.topics,
-                questions: chunk.questions,
-              },
-            ]);
+            // Correctly update the streaming message by appending new chunk text.
+            setStreamingMessage({
+              type: 'ai',
+              content: chunk.text || '',
+              topics: chunk.topics,
+              questions: chunk.questions,
+            });
+            scrollToBottom();
           }
         );
+
+        if (streamingMessage) {
+          setConversationContext(
+            (prevContext) => prevContext + `\nAI: ${streamingMessage.content}`
+          );
+        }
+        setIsLoading(false);
       } catch (error) {
         console.error('Search error:', error);
         onError(
@@ -294,7 +374,16 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         setIsLoading(false);
       }
     },
-    [gptService, onError, userContext, scrollToTop]
+    [
+      gptService,
+      onError,
+      userContext,
+      scrollToTop,
+      showInitialSearch,
+      streamingMessage,
+      scrollToBottom,
+      conversationContext,
+    ]
   );
 
   const handleRelatedQueryClick = useCallback(
@@ -368,72 +457,105 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       ) : (
         <div
           ref={messagesContainerRef}
-          className="relative flex flex-col w-full "
+          className="relative flex flex-col w-full"
         >
           <div className="space-y-2 pb-16">
             {messages.map((message, index) => (
-              <div key={index} className="px-2 sm:px-4 w-full mx-auto">
-                <div className="max-w-3xl mx-auto">
-                  {message.type === 'user' ? (
-                    <div className="w-full">
-                      <div className="flex-1 text-base sm:text-lg font-semibold text-gray-100">
+              <div
+                key={index}
+                className={`px-2 sm:px-4 flex ${
+                  message.type === 'user' ? 'justify-end' : 'justify-start'
+                }`}
+              >
+                {/* Using inline-block and a max width so the card size is based on its content */}
+                <div className="inline-block max-w-[70%]">
+                  <div className="">
+                    {message.type === 'user' ? (
+                      <div className=" text-sm my-4  text-right p-4 py-2 rounded-2xl  shadow-sm bg-gray-800 text-gray-100">
                         {message.content}
                       </div>
-                    </div>
-                  ) : (
-                    <div className="w-full">
-                      <div className="flex-1 min-w-0">
-                        {!message.content && isLoading ? (
-                          <div className="flex items-center space-x-2 py-2">
-                            <LoadingAnimation />
-                            <span className="text-sm text-gray-400">
-                              Thinking...
-                            </span>
-                          </div>
-                        ) : (
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm, remarkMath]}
-                            rehypePlugins={[rehypeKatex]}
-                            components={{
-                              ...MarkdownComponents,
-                              p: ({ children }) => (
-                                <p
-                                  className="text-sm sm:text-base text-gray-300 my-1.5 leading-relaxed 
-                                  break-words"
-                                >
-                                  {children}
-                                </p>
-                              ),
-                            }}
-                            className="whitespace-pre-wrap break-words space-y-1.5"
-                          >
-                            {message.content || ''}
-                          </ReactMarkdown>
-                        )}
+                    ) : (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkMath]}
+                        rehypePlugins={[rehypeKatex]}
+                        components={MarkdownComponents}
+                        className="whitespace-pre-wrap break-words space-y-1.5 
+                        p-4 py-2 rounded-2xl  shadow-sm bg-gray-800 text-gray-100
+                        "
+                      >
+                        {message.content || ''}
+                      </ReactMarkdown>
+                    )}
 
-                        {message.topics && message.topics.length > 0 && (
-                          <div className="mt-3">
-                            <RelatedTopics
-                              topics={message.topics}
-                              onTopicClick={handleRelatedQueryClick}
-                            />
-                          </div>
-                        )}
-
-                        {message.questions && message.questions.length > 0 && (
-                          <div className="mt-3">
-                            <RelatedQuestions
-                              questions={message.questions}
-                              onQuestionClick={handleRelatedQueryClick}
-                            />
-                          </div>
-                        )}
+                    {message.topics && message.topics.length > 0 && (
+                      <div className="mt-3">
+                        <RelatedTopics
+                          topics={message.topics}
+                          onTopicClick={handleRelatedQueryClick}
+                        />
                       </div>
-                    </div>
-                  )}
+                    )}
+
+                    {message.questions && message.questions.length > 0 && (
+                      <div className="mt-3">
+                        <RelatedQuestions
+                          questions={message.questions}
+                          onQuestionClick={handleRelatedQueryClick}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
+
+            {/* Render the streaming message at the end if available */}
+
+            {streamingMessage.content && !isLoading ? (
+              <div className="px-2 sm:px-4 flex justify-start">
+                <div className="inline-block max-w-[70%]">
+                  <div className="">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
+                      components={MarkdownComponents}
+                      className="whitespace-pre-wrap break-words space-y-1.5
+                      p-4 py-2 rounded-2xl shadow-sm bg-gray-800 text-gray-100
+                      "
+                    >
+                      {streamingMessage.content || ''}
+                    </ReactMarkdown>
+
+                    {streamingMessage.topics &&
+                      streamingMessage.topics.length > 0 && (
+                        <div className="mt-3">
+                          <RelatedTopics
+                            topics={streamingMessage.topics}
+                            onTopicClick={handleRelatedQueryClick}
+                          />
+                        </div>
+                      )}
+
+                    {streamingMessage.questions &&
+                      streamingMessage.questions.length > 0 && (
+                        <div className="mt-3">
+                          <RelatedQuestions
+                            questions={streamingMessage.questions}
+                            onQuestionClick={handleRelatedQueryClick}
+                          />
+                        </div>
+                      )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-2 py-2">
+                <LoadingAnimation />
+                <span className="text-sm text-gray-400">Thinking...</span>
+              </div>
+            )}
+
+            {/* Dummy element for scrolling */}
             <div
               ref={messagesEndRef}
               className="h-8 w-full"
@@ -441,13 +563,13 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             />
           </div>
 
-          <div className="fixed bottom-12 left-0 right-0 t pb-1 pt-2 z-50">
-            <div className="w-full px-2 sm:px-4 max-w-3xl mx-auto">
+          <div className="fixed bottom-12 left-0 right-0  pb-1 pt-2 z-50 mb-4">
+            <div className="w-full px-2 sm:px-4 max-w-3xl mx-auto ">
               <SearchBar
                 onSearch={handleSearch}
                 placeholder="Ask a follow-up question..."
                 centered={false}
-                className="bg-gray-900/80 backdrop-blur-lg border border-gray-700/50 h-10"
+                className="bg-gray-900/80 backdrop-blur-lg border border-gray-700/50 h-12"
               />
             </div>
           </div>

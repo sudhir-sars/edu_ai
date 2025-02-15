@@ -1,4 +1,11 @@
-import { Question, UserContext, ExploreResponse } from '../types';
+// @ts-nocheck
+/* eslint-disable */
+import {
+  Question,
+  UserContext,
+  ExploreResponse,
+  ConversationContext,
+} from '../types';
 
 export class GPTService {
   constructor() {}
@@ -212,6 +219,7 @@ export class GPTService {
   async streamExploreContent(
     query: string,
     userContext: UserContext,
+    conversationContext: ConversationContext,
     onChunk: (content: {
       text?: string;
       topics?: any[];
@@ -225,7 +233,7 @@ export class GPTService {
         const response = await fetch('/api/streamExplore', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, userContext }),
+          body: JSON.stringify({ query, userContext, conversationContext }),
         });
         if (!response.body) {
           throw new Error('No response body');

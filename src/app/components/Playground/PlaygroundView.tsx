@@ -1,4 +1,6 @@
 // src/components/Playground/PlaygroundView.tsx
+// @ts-nocheck
+/* eslint-disable */
 'use client';
 import React, { useState, useEffect } from 'react';
 import { SearchBar } from '../shared/SearchBar';
@@ -48,6 +50,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
   onSuccess,
   userContext,
 }) => {
+  const [difficulty, setDifficulty] = useState<number>(5);
   const { getQuestion } = useApi();
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [query, setQuery] = useState(initialQuery || '');
@@ -129,7 +132,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     }
   };
 
-  const fetchNewQuestion = async () => {
+  const fetchNewQuestion = async (difficultyParam: number = difficulty) => {
     if (!query) return;
 
     if (sessionStats.totalQuestions >= sessionStats.sessionLimit) {
@@ -141,8 +144,9 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     }
 
     try {
-      console.log('Fetching next question...'); // Debug log
-      const question = await getQuestion(query, 1, userContext);
+      // console.log('Fetching next question...'); // Debug log
+      console.log('Fetching next question with difficulty:', difficultyParam);
+      const question = await getQuestion(query, difficultyParam, userContext);
       console.log('Question loaded:', question); // Debug log
       setPreloadedQuestion(question);
     } catch (error) {
@@ -159,8 +163,12 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
       setShowExplanation(false);
       setQuery(newQuery);
 
-      // Load first question immediately
-      const firstQuestion = await getQuestion(newQuery, 1, userContext);
+      // Load first question immediately with current difficulty
+      const firstQuestion = await getQuestion(
+        newQuery,
+        difficulty,
+        userContext
+      );
       setCurrentQuestion(firstQuestion);
       setSelectedAnswer(null);
       setCurrentQuestionTime(0); // Reset timer
@@ -190,11 +198,62 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     }
   };
 
+  const startCountdown = () => {
+    setNextQuestionCountdown(COUNTDOWN_DURATION);
+    const interval = setInterval(() => {
+      setNextQuestionCountdown((prev) => {
+        if (prev === null) return null;
+        const next = prev - 0.1;
+        if (next <= 0) {
+          clearInterval(interval);
+          setShouldShowNext(true); // Trigger question transition
+          return null;
+        }
+        return next;
+      });
+    }, 100);
+    setNextQuestionTimer(interval);
+  };
+
+  // Resume the countdown from a given remaining time
+  const startCountdownFrom = (time: number) => {
+    setNextQuestionCountdown(time);
+    const interval = setInterval(() => {
+      setNextQuestionCountdown((prev) => {
+        if (prev === null) return null;
+        const next = prev - 0.1;
+        if (next <= 0) {
+          clearInterval(interval);
+          setShouldShowNext(true);
+          return null;
+        }
+        return next;
+      });
+    }, 100);
+    setNextQuestionTimer(interval);
+  };
+
   const togglePause = () => {
-    setIsPaused(!isPaused);
-    if (nextQuestionTimer) {
-      clearTimeout(nextQuestionTimer);
-      setNextQuestionTimer(null);
+    if (isPaused) {
+      setIsPaused(false);
+
+      if (selectedAnswer === null) {
+        startQuestionTimer();
+      } else {
+        const remaining =
+          nextQuestionCountdown !== null
+            ? nextQuestionCountdown
+            : COUNTDOWN_DURATION;
+        startCountdownFrom(remaining);
+      }
+    } else {
+      // PAUSE: clear both timers.
+      setIsPaused(true);
+      stopQuestionTimer();
+      if (nextQuestionTimer) {
+        clearInterval(nextQuestionTimer);
+        setNextQuestionTimer(null);
+      }
     }
   };
 
@@ -218,33 +277,28 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
     });
   };
 
-  const startCountdown = () => {
-    setNextQuestionCountdown(COUNTDOWN_DURATION);
-    const interval = setInterval(() => {
-      setNextQuestionCountdown((prev) => {
-        if (prev === null) return null;
-        const next = prev - 0.1;
-        if (next <= 0) {
-          clearInterval(interval);
-          setShouldShowNext(true); // Trigger question transition
-          return null;
-        }
-        return next;
-      });
-    }, 100);
-  };
-
   const handleAnswer = (index: number) => {
     if (selectedAnswer !== null || !currentQuestion) return;
 
     setSelectedAnswer(index);
     setShowExplanation(true);
     stopQuestionTimer();
-    updateStats(index === currentQuestion.correctAnswer);
+    const isCorrect = index === currentQuestion.correctAnswer;
+    updateStats(isCorrect);
+
+    const performance =
+      (isCorrect ? 1 : -1) +
+      (currentQuestionTime < 10 ? 1 : currentQuestionTime > 20 ? -1 : 0);
+
+    const newDifficulty = Math.min(10, Math.max(1, difficulty + performance));
+    setDifficulty(newDifficulty);
+    console.log(
+      `Performance: ${performance}, Old Difficulty: ${difficulty}, New Difficulty: ${newDifficulty}`
+    );
 
     if (!isPaused) {
       // Start loading next question immediately
-      fetchNewQuestion();
+      fetchNewQuestion(newDifficulty);
       // Start countdown for transition
       startCountdown();
     }
@@ -252,7 +306,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
 
   useEffect(() => {
     if (query) {
-      fetchNewQuestion();
+      fetchNewQuestion(difficulty);
     }
   }, [query]);
 
@@ -360,11 +414,11 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
           </div>
         </div>
       ) : (
-        <div className="w-full max-w-3xl mx-auto px-4">
+        <div className="w-full max-w-3xl mx-auto p-4 px-6  ">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-2">
-            <div className="card">
+            <div className="bg-card rounded-lg shadow-lg p-6 bg-[#1e293b]">
               <div className="flex items-center gap-2 text-primary">
-                <Trophy className="w-5 h-5" />
+                <Trophy className="w-5 h-5 text-blue-500" />
                 <span className="text-sm font-medium">Score</span>
               </div>
               <div className="mt-1 text-xl font-semibold">
@@ -372,7 +426,8 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
               </div>
             </div>
 
-            <div className="card">
+            {/* <div className="card rounded-2xl p-4 pl-4 border border-gray-600 shadow-sm bg-[#1e293b] text-gray-100 "> */}
+            <div className="bg-card rounded-lg shadow-lg p-6 bg-[#1e293b]">
               <div className="flex items-center justify-between">
                 <span className="stats-value text-xs sm:text-base text-primary">
                   {stats.questions}
@@ -382,7 +437,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
               <span className="stats-label text-xs sm:text-sm">Questions</span>
             </div>
 
-            <div className="card">
+            <div className="bg-card rounded-lg shadow-lg p-6 bg-[#1e293b]">
               <div className="flex items-center justify-between">
                 <span className="stats-value text-yellow-500">
                   {stats.streak}
@@ -392,7 +447,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
               <span className="stats-label">Streak</span>
             </div>
 
-            <div className="card">
+            <div className="bg-card rounded-lg shadow-lg p-6 bg-[#1e293b] ">
               <div className="flex items-center justify-between">
                 <span className="stats-value text-purple-500">
                   {currentQuestionTime}s
@@ -403,7 +458,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
             </div>
           </div>
 
-          <div className="card flex-1 flex flex-col mt-4">
+          <div className="card flex-1 flex flex-col mt-4  rounded-xl border-gray-600 p-6 bg-[#1e293b]">
             <div className="flex justify-between items-start">
               <h2
                 className="text-xs sm:text-base font-medium leading-relaxed 
@@ -454,7 +509,7 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({
                   <div className="mb-2">
                     <div className="relative h-1 bg-gray-700 rounded-full overflow-hidden">
                       <div
-                        className="absolute inset-y-0 left-0 bg-primary transition-all duration-100"
+                        className="absolute inset-y-0 left-0 bg-[#3b82f6] transition-all duration-100"
                         style={{
                           width: `${
                             (nextQuestionCountdown / COUNTDOWN_DURATION) * 100

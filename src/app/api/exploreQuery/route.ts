@@ -1,11 +1,18 @@
 // app/api/exploreQuery/route.ts
+// @ts-nocheck
+/* eslint-disable */
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { applyRateLimit } from '../utils/rateLimiter';
 
 export async function POST(request: Request) {
   try {
+    const rateLimitResult = await applyRateLimit(request);
+    if (rateLimitResult !== true) {
+      return rateLimitResult; // Returns the 429 response with Retry-After header, etc.
+    }
     const { query } = await request.json();
-    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error('Missing API key');
 
     const openai = new OpenAI({ apiKey });

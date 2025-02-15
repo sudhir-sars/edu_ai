@@ -44,3 +44,11 @@ declare global {
     dataLayer: any[];
   }
 }
+export interface ConversationMessage {
+  role: 'user' | 'ai';
+  content: string;
+}
+
+export interface ConversationContext {
+  messages: ConversationMessage[];
+}
