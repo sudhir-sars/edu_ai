@@ -35,7 +35,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <UserProvider>
-          <SidebarWrapper />
+          {/* <SidebarWrapper /> */}
           {children}
         </UserProvider>
       </body>
